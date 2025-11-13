@@ -122,3 +122,114 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#DATA PREPROCESSING 
+
+import pandas as pd
+
+# Load the dataset
+file_name = "human_vital_signs_dataset_2024.csv"
+df = pd.read_csv(file_name)
+
+# Display the first few rows
+print("--- DataFrame Head ---")
+print(df.head().to_markdown(index=False, numalign="left", stralign="left"))
+
+# Display column information
+print("\n--- DataFrame Info ---")
+df.info()
+
+
+# Convert 'Timestamp' column to datetime objects
+df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+
+# Verify the conversion
+print(df['Timestamp'].dtype)
+
+
+# Check unique values in 'Gender' and 'Risk Category'
+print("\nUnique values in 'Gender':", df['Gender'].unique())
+print("Unique values in 'Risk Category':", df['Risk Category'].unique())
+
+# Assuming we find values like ['Male', 'Female', 'male', 'female'], we would standardize them:
+# df['Gender'] = df['Gender'].str.capitalize()
+
+
+
+# Example for Heart Rate outlier detection (assuming a plausible range)
+hr_min = 40
+hr_max = 180
+outliers_hr = df[(df['Heart Rate'] < hr_min) | (df['Heart Rate'] > hr_max)]
+print(f"\nNumber of Heart Rate outliers (outside {hr_min}-{hr_max} bpm): {len(outliers_hr)}")
+
+# Handling: Removing the identified outliers (if chosen)
+# df = df[(df['Heart Rate'] >= hr_min) & (df['Heart Rate'] <= hr_max)]
+
+
+# Extract the hour of the reading
+df['Reading_Hour'] = df['Timestamp'].dt.hour
+
+# Extract the day of the week
+df['Day_of_Week'] = df['Timestamp'].dt.day_name()
+
+# Display the new columns
+print("\nDataFrame with new features:")
+print(df[['Timestamp', 'Reading_Hour', 'Day_of_Week']].head().to_markdown(index=False, numalign="left", stralign="left"))
+
+
+
+# 1. Label Encode the 'Risk Category' (Target)
+# Assuming 'High Risk' = 1 and 'Low Risk' = 0
+df['Risk Category Encoded'] = df['Risk Category'].map({'High Risk': 1, 'Low Risk': 0})
+
+# 2. Label Encode 'Gender'
+# Assuming 'Male' = 1 and 'Female' = 0 (or vice versa, the order doesn't drastically change for binary)
+df['Gender Encoded'] = df['Gender'].map({'Male': 1, 'Female': 0})
+
+# Drop the original categorical columns
+df = df.drop(columns=['Gender', 'Risk Category'])
+
+print("\n--- After Encoding and Dropping Originals ---")
+print(df[['Gender Encoded', 'Risk Category Encoded']].head().to_markdown(index=False, numalign="left", stralign="left"))
+
+
+
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+
+# Identify numerical columns for scaling (excluding IDs and the encoded/datetime columns)
+# We will use all float64 and int64 columns except Patient ID, and the encoded columns
+numerical_cols = df.select_dtypes(include=np.number).columns.tolist()
+cols_to_exclude = ['Patient ID', 'Gender Encoded', 'Risk Category Encoded']
+features_to_scale = [col for col in numerical_cols if col not in cols_to_exclude]
+
+# Initialize the Scaler
+scaler = StandardScaler()
+
+# Apply Standardization to the selected features
+df[features_to_scale] = scaler.fit_transform(df[features_to_scale])
+
+print("\n--- After Feature Scaling (Standardization) ---")
+print(df[features_to_scale].head().to_markdown(index=False, numalign="left", stralign="left"))
+
+
+
+# Check the correlation matrix for highly correlated features
+# Example: Correlation between derived features and their source features
+correlation_check = df[['Systolic Blood Pressure', 'Diastolic Blood Pressure', 'Derived_Pulse_Pressure', 'Derived_MAP']].corr()
+
+print("\n--- Correlation Check (SBP, DBP, PP, MAP) ---")
+print(correlation_check.to_markdown(numalign="left", stralign="left"))
+
+# Action to take (if correlation is very high, e.g., > 0.95):
+# Drop one of the highly correlated columns, e.g., df = df.drop(columns=['Derived_Pulse_Pressure'])
+
+
+
+# Final check of the data types
+df.info()
+
+# Save the cleaned data to a new CSV file
+# df.to_csv('human_vital_signs_cleaned.csv', index=False)
+
+

@@ -1,2 +1,13 @@
-IF heart_rate >> 100 THEN CRITICAL
-IF oxygen_saturation < THEN MODERATE
+# Test file for invalid interpreter rules.
+#
+# This script should fail at the Lexer stage.
+#
+# Invalid Rule: 'Heart Rate' is not in single quotes.
+
+IF Heart Rate > 100 THEN
+SET Risk = "High Risk"
+
+# This part will not be reached
+
+IF 'Age' < 18 THEN
+SET Risk = "Pediatric"

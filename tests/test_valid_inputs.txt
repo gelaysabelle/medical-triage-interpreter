@@ -1,3 +1,27 @@
-IF heart_rate > 50 AND oxygen_saturation < 99 THEN CRITICAL
-IF systolic_blood_pressure < 100 THEN MODERATE
-IF body_temperature > 38 THEN MODERATE
+# Rule 1: High-Risk (Simulating the notebook's 'Critical' logic)
+IF ('Heart Rate' > 100 OR 'Heart Rate' < 60) AND 'Oxygen Saturation' < 95 THEN
+SET 'Risk' = "High Risk"
+
+# Rule 2: Moderate-Risk (e.g., fever or high BP)
+IF 'Body Temperature' >= 100.4 THEN
+SET 'Risk' = "Moderate Risk"
+SET 'Fever' = True
+
+IF 'Systolic Blood Pressure' > 140 OR 'Diastolic Blood Pressure' > 90 THEN
+SET 'Risk' = "Moderate Risk"
+
+# Rule 3: Low-Risk (Default baseline, if no other rules hit)
+IF 'Risk' IS NULL THEN
+SET 'Risk' = "Low Risk"
+
+# Rule 4: Handle missing data (a key feature of our interpreter)
+IF 'Heart Rate' IS NULL OR 'Oxygen Saturation' IS NULL THEN
+SET 'Risk' = "Unknown - Vitals Missing"
+
+# Rule 5: Use a Feature-Engineered Column ('BMI')
+IF 'BMI' > 30 THEN
+SET 'Needs_Obesity_Consult' = True
+
+# Rule 6: Use a Feature-Engineered Column ('MAP')
+IF 'MAP' < 65 THEN
+SET 'Risk' = "Critical"

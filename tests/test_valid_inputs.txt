@@ -1,0 +1,3 @@
+IF heart_rate > 50 AND oxygen_saturation < 99 THEN CRITICAL
+IF systolic_blood_pressure < 100 THEN MODERATE
+IF body_temperature > 38 THEN MODERATE

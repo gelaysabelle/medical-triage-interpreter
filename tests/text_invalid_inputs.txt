@@ -1,0 +1,2 @@
+IF heart_rate >> 100 THEN CRITICAL
+IF oxygen_saturation < THEN MODERATE

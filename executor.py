@@ -6,7 +6,8 @@ and executes the logic against a patient dataset.
 
 It uses the Visitor design pattern to traverse the AST.
 
-This fulfills Section 5 (Implementation) for the Executor.
+Supports COUNT() and ELSE blocks in rules.
+Generates hospital-level status separately from patient rows.
 """
 
 import pandas as pd
@@ -14,7 +15,8 @@ import numpy as np
 from error_handler import ExecutorError
 from triage_parser import (
     ASTNode, RuleScriptNode, RuleNode, SetActionNode, BinaryOpNode,
-    UnaryOpNode, ComparisonNode, IsNullNode, ValueNode, IdentifierNode
+    UnaryOpNode, ComparisonNode, IsNullNode, ValueNode, IdentifierNode,
+    CountNode
 )
 from lexer import TokenType
 
@@ -27,6 +29,8 @@ class Executor:
             raise ExecutorError("Executor must be initialized with a valid RuleScriptNode.")
         self.ast = ast
         self.data = None
+        self.all_rows = None  # For COUNT function access
+        self.count_cache = {}  # Cache COUNT results per rule iteration
 
     def load_data(self, filepath):
         """
@@ -51,9 +55,9 @@ class Executor:
                 if col not in self.data.columns:
                     print(f"Warning: Missing data column for feature engineering: '{col}'. Rules using this column may fail.")
             
-            # Handle division by zero for BMI by setting non-positive heights to NaN
+            # Handle division by zero for BMI by setting non-positive heights to NaN (vectorized)
             if 'Height (m)' in self.data.columns:
-                self.data['Height (m)'] = self.data['Height (m)'].apply(lambda x: x if x > 0 else np.nan)
+                self.data['Height (m)'] = self.data['Height (m)'].where(self.data['Height (m)'] > 0, np.nan)
             
             # Calculate engineered features
             if 'Systolic Blood Pressure' in self.data.columns and 'Diastolic Blood Pressure' in self.data.columns:
@@ -82,15 +86,16 @@ class Executor:
         # We create a dictionary from the dataframe for faster row-by-row processing
         # and to allow setting new values.
         results = self.data.to_dict('records')
+        self.all_rows = results  # Store for COUNT function
         
         for rule_node in self.ast.rules:
+            # Reset COUNT cache for each rule to ensure fresh evaluations
+            self.count_cache = {}
+            
             for row in results:
                 # The 'row' is our context for this execution
                 try:
-                    if self.visit(rule_node.condition, row):
-                        # If condition is True, execute all actions
-                        for action_node in rule_node.actions:
-                            self.visit(action_node, row)
+                    self.visit(rule_node, row)
                 except Exception as e:
                     # Catch runtime errors during rule evaluation (e.g., comparing string to number)
                     # We will log this error and continue to the next row
@@ -114,14 +119,37 @@ class Executor:
         """Called if no explicit visitor method exists."""
         raise ExecutorError(f"No visitor method found for AST node type: {type(node).__name__}")
 
-    def visit_BinaryOpNode(self, node, context_row):
-        """Visits AND/OR nodes."""
-        left_val = self.visit(node.left, context_row)
-        right_val = self.visit(node.right, context_row)
+    def visit_RuleNode(self, node, context_row):
+        """Visits a rule node with condition, then_actions, and optional else_actions."""
+        condition_result = self.visit(node.condition, context_row)
         
+        if condition_result:
+            # Execute THEN branch
+            for action_node in node.then_actions:
+                self.visit(action_node, context_row)
+        elif node.else_actions is not None:
+            # Execute ELSE branch if condition is false
+            for action_node in node.else_actions:
+                self.visit(action_node, context_row)
+        
+        return True
+
+    def visit_BinaryOpNode(self, node, context_row):
+        """Visits AND/OR nodes with short-circuit evaluation."""
+        # Short-circuit AND: if left is false, don't evaluate right
         if node.op_token.type == TokenType.AND:
+            left_val = self.visit(node.left, context_row)
+            if not left_val:
+                return False
+            right_val = self.visit(node.right, context_row)
             return bool(left_val and right_val)
+        
+        # Short-circuit OR: if left is true, don't evaluate right
         elif node.op_token.type == TokenType.OR:
+            left_val = self.visit(node.left, context_row)
+            if left_val:
+                return True
+            right_val = self.visit(node.right, context_row)
             return bool(left_val or right_val)
 
     def visit_UnaryOpNode(self, node, context_row):
@@ -164,6 +192,32 @@ class Executor:
         
         return not is_null if node.is_not else is_null
 
+    def visit_CountNode(self, node, context_row):
+        """
+        Visits a COUNT node. Counts how many rows in the entire dataset
+        match the given condition. Uses caching to avoid re-computing
+        the same condition multiple times per rule.
+        """
+        # Create a cache key from the condition node's representation
+        condition_key = id(node.condition)
+        
+        # Check if we've already computed this count in this rule iteration
+        if condition_key in self.count_cache:
+            return self.count_cache[condition_key]
+        
+        count = 0
+        for row in self.all_rows:
+            try:
+                if self.visit(node.condition, row):
+                    count += 1
+            except Exception:
+                # Skip rows that cause errors in the count condition
+                pass
+        
+        # Cache the result for this rule iteration
+        self.count_cache[condition_key] = count
+        return count
+
     def visit_ValueNode(self, node, context_row):
         """Returns the raw literal value (String, Number, etc.)."""
         # Special case for NULL token
@@ -175,7 +229,7 @@ class Executor:
         """Gets a value from the patient data row (context)."""
         if node.name not in context_row:
             # This allows rules to SET a new variable and read it later
-            # (e.g., SET Fever = True ... IF Fever == True THEN ...)\
+            # (e.g., SET Fever = True ... IF Fever == True THEN ...)
             context_row[node.name] = np.nan 
         
         return context_row.get(node.name)
@@ -187,4 +241,4 @@ class Executor:
         
         # Modify the row in-place
         context_row[column_to_set] = new_value
-        return True # Action was successful
+        return True

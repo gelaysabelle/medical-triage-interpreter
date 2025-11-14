@@ -5,7 +5,7 @@ This module takes the list of tokens from the Lexer and builds an
 Abstract Syntax Tree (AST). The AST is a tree-like structure that
 represents the grammar and logic of the rule script.
 
-This fulfills Section 5 (Implementation) for the Parser.
+Supports new keywords: COUNT (for counting high-risk patients) and ELSE.
 """
 
 from lexer import TokenType
@@ -13,7 +13,6 @@ from error_handler import ParserError
 
 ###############################################################################
 # AST (Abstract Syntax Tree) Node Classes
-# These classes define the structure of our parsed rules.
 ###############################################################################
 
 class ASTNode:
@@ -26,16 +25,17 @@ class RuleScriptNode(ASTNode):
         self.rules = rules # List of RuleNode objects
 
 class RuleNode(ASTNode):
-    """Represents a single 'IF ... THEN ...' rule."""
-    def __init__(self, condition, actions):
+    """Represents a single 'IF ... THEN ... (ELSE ...)' rule."""
+    def __init__(self, condition, then_actions, else_actions=None):
         self.condition = condition # A condition node
-        self.actions = actions     # A list of SetActionNode objects
+        self.then_actions = then_actions     # A list of action nodes (SetActionNode or nested RuleNode)
+        self.else_actions = else_actions     # NEW: Optional list of actions for ELSE branch
 
 class SetActionNode(ASTNode):
     """Represents a 'SET variable = value' action."""
     def __init__(self, identifier, value_node):
         self.identifier = identifier # The new/updated column name (e.g., 'Risk')
-        self.value_node = value_node # A ValueNode (String, Number, etc.)
+        self.value_node = value_node # A ValueNode (String, Number, etc.) or CountNode
 
 class BinaryOpNode(ASTNode):
     """Represents a binary operation (e.g., AND, OR)."""
@@ -62,6 +62,11 @@ class IsNullNode(ASTNode):
     def __init__(self, identifier, is_not):
         self.identifier = identifier
         self.is_not = is_not # Boolean, True if "IS NOT NULL"
+
+class CountNode(ASTNode):
+    """Represents a COUNT function (e.g., COUNT WHERE 'Risk' == "High Risk")."""
+    def __init__(self, condition):
+        self.condition = condition # The condition to count matching rows
 
 class ValueNode(ASTNode):
     """Represents a literal value (String, Number, Boolean, Null)."""
@@ -118,32 +123,119 @@ class Parser:
     def parse(self):
         """Main entry point. Parses the entire script."""
         rules = []
+        # Skip leading newlines
+        while self.current_token.type == TokenType.NEWLINE:
+            self.advance()
+        
         while self.current_token.type != TokenType.EOF:
-            rules.append(self.parse_rule())
+            rules.append(self.parse_rule(is_nested=False))
+            # Skip any newlines between rules
+            while self.current_token.type == TokenType.NEWLINE:
+                self.advance()
         
         if not rules:
             raise ParserError("Empty rule script. Expected one or more 'IF' rules.", 1, 1)
             
         return RuleScriptNode(rules)
 
-    def parse_rule(self):
-        """Parses a single 'IF ... THEN ...' rule."""
+    def parse_rule(self, is_nested=False):
+        """
+        Parses a single 'IF ... THEN ... (ELSE ...)' rule.
+        If is_nested=True, this is a nested IF inside a THEN/ELSE block.
+        If is_nested=False, this is a top-level rule and should NOT consume IFs after blank lines.
+        """
         self.consume(TokenType.IF)
         
         condition = self.parse_condition()
         
         self.consume(TokenType.THEN)
         
-        actions = []
-        # Allow one or more SET actions
-        while self.current_token.type == TokenType.SET:
-            actions.append(self.parse_action())
+        # Skip newlines after THEN
+        while self.current_token.type == TokenType.NEWLINE:
+            self.advance()
+        
+        # Parse THEN actions (can include nested IFs or SETs)
+        # For top-level rules, stop if we see IF after a blank line
+        then_actions = []
+        while self.current_token.type in (TokenType.SET, TokenType.IF):
+            if self.current_token.type == TokenType.SET:
+                then_actions.append(self.parse_action())
+                # Track if there's a blank line after this SET
+                blank_line_after_set = False
+                newline_count = 0
+                while self.current_token.type == TokenType.NEWLINE:
+                    newline_count += 1
+                    self.advance()
+                # If there were multiple newlines (blank line), mark it
+                if newline_count > 1:
+                    blank_line_after_set = True
+                
+                # If this is a top-level rule and we see IF after blank line, stop parsing THEN
+                if not is_nested and blank_line_after_set and self.current_token.type == TokenType.IF:
+                    break
+            elif self.current_token.type == TokenType.IF:
+                # Nested IF statement - always parse as nested
+                then_actions.append(self.parse_rule(is_nested=True))
+                # Skip newlines after nested IF
+                blank_line_after_if = False
+                newline_count = 0
+                while self.current_token.type == TokenType.NEWLINE:
+                    newline_count += 1
+                    self.advance()
+                if newline_count > 1:
+                    blank_line_after_if = True
+                
+                # If this is a top-level rule and we see IF after blank line, stop parsing THEN
+                if not is_nested and blank_line_after_if and self.current_token.type == TokenType.IF:
+                    break
             
-        if not actions:
-            raise ParserError("Expected at least one 'SET' action after 'THEN'",
+        if not then_actions:
+            raise ParserError("Expected at least one action (SET or nested IF) after 'THEN'",
                               self.current_token.line, self.current_token.col)
+        
+        # Parse optional ELSE clause
+        else_actions = None
+        if self.current_token.type == TokenType.ELSE:
+            self.advance()
+            # Skip newlines after ELSE
+            while self.current_token.type == TokenType.NEWLINE:
+                self.advance()
+            
+            else_actions = []
+            while self.current_token.type in (TokenType.SET, TokenType.IF):
+                if self.current_token.type == TokenType.SET:
+                    else_actions.append(self.parse_action())
+                    # Skip newlines after SET
+                    blank_line_after_set = False
+                    newline_count = 0
+                    while self.current_token.type == TokenType.NEWLINE:
+                        newline_count += 1
+                        self.advance()
+                    if newline_count > 1:
+                        blank_line_after_set = True
+                    # Stop if we hit blank line + next rule in top-level ELSE
+                    if not is_nested and blank_line_after_set and self.current_token.type == TokenType.IF:
+                        break
+                elif self.current_token.type == TokenType.IF:
+                    # Nested IF in ELSE
+                    else_actions.append(self.parse_rule(is_nested=True))
+                    # Skip newlines after nested IF
+                    blank_line_after_if = False
+                    newline_count = 0
+                    while self.current_token.type == TokenType.NEWLINE:
+                        newline_count += 1
+                        self.advance()
+                    if newline_count > 1:
+                        blank_line_after_if = True
+                    # Stop if we hit blank line + next rule
+                    if not is_nested and blank_line_after_if and self.current_token.type == TokenType.IF:
+                        break
+            
+            if not else_actions:
+                raise ParserError("Expected at least one action (SET or nested IF) after 'ELSE'",
+                                  self.current_token.line, self.current_token.col)
                               
-        return RuleNode(condition=condition, actions=actions)
+        return RuleNode(condition=condition, then_actions=then_actions, else_actions=else_actions)
 
     def parse_action(self):
         """Parses a 'SET IDENTIFIER = value' action."""
@@ -155,14 +247,28 @@ class Parser:
         
         self.consume(TokenType.ASSIGN)
         
+        # Check if value is a COUNT function
+        if self.current_token.type == TokenType.COUNT:
+            value_node = self.parse_count()
+            return SetActionNode(identifier_node, value_node)
+        
         value_token_types = (TokenType.STRING, TokenType.NUMBER, TokenType.BOOLEAN, TokenType.NULL)
         if self.current_token.type in value_token_types:
             value_node = ValueNode(self.current_token)
             self.advance()
             return SetActionNode(identifier_node, value_node)
         else:
-            raise ParserError(f"Expected a value (String, Number, Boolean, or Null) but got {self.current_token.type.name}",
+            raise ParserError(f"Expected a value (String, Number, Boolean, Null, or COUNT) but got {self.current_token.type.name}",
                               self.current_token.line, self.current_token.col)
+
+    def parse_count(self):
+        """Parses a COUNT WHERE condition function."""
+        self.consume(TokenType.COUNT)
+        self.consume(TokenType.WHERE)
+        
+        condition = self.parse_condition()
+        
+        return CountNode(condition)
 
     def parse_condition(self):
         """Parses a condition, which can have AND/OR logic."""

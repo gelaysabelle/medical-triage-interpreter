@@ -1,27 +1,75 @@
-# Rule 1: High-Risk (Simulating the notebook's 'Critical' logic)
-IF ('Heart Rate' > 100 OR 'Heart Rate' < 60) AND 'Oxygen Saturation' < 95 THEN
+# ============================================
+# Medical Triage Rule Script (Three-Level Risk)
+# ============================================
+
+# Rule 1a: High-Risk (Heart/Oxygen/Fever)
+IF 'Heart Rate' > 110 OR 'Heart Rate' < 50 AND 'Oxygen Saturation' < 94 OR 'Body Temperature' >= 100.4 THEN
 SET 'Risk' = "High Risk"
+ELSE
+SET 'Risk' = "Normal"
 
-# Rule 2: Moderate-Risk (e.g., fever or high BP)
+# Rule 1b: Moderate-Risk (Heart/Oxygen/Fever)
+IF ('Heart Rate' > 100 OR 'Heart Rate' < 60) OR ('Oxygen Saturation' >= 94 AND 'Oxygen Saturation' < 96) OR ('Body Temperature' >= 100 AND 'Body Temperature' < 100.4) THEN
+SET 'Risk' = "Moderate Risk"
+ELSE
+SET 'Risk' = "Normal"
+
+# Rule 2: Fever detection
 IF 'Body Temperature' >= 100.4 THEN
-SET 'Risk' = "Moderate Risk"
 SET 'Fever' = True
+ELSE
+SET 'Fever' = False
 
-IF 'Systolic Blood Pressure' > 140 OR 'Diastolic Blood Pressure' > 90 THEN
-SET 'Risk' = "Moderate Risk"
-
-# Rule 3: Low-Risk (Default baseline, if no other rules hit)
-IF 'Risk' IS NULL THEN
-SET 'Risk' = "Low Risk"
-
-# Rule 4: Handle missing data (a key feature of our interpreter)
-IF 'Heart Rate' IS NULL OR 'Oxygen Saturation' IS NULL THEN
-SET 'Risk' = "Unknown - Vitals Missing"
-
-# Rule 5: Use a Feature-Engineered Column ('BMI')
-IF 'BMI' > 30 THEN
+# Rule 3: Obesity check
+IF 'Derived_BMI' >= 30 THEN
 SET 'Needs_Obesity_Consult' = True
+ELSE
+SET 'Needs_Obesity_Consult' = False
 
-# Rule 6: Use a Feature-Engineered Column ('MAP')
-IF 'MAP' < 65 THEN
-SET 'Risk' = "Critical"
+# Rule 4a: Recommendation for High Risk
+IF 'Risk' == "High Risk" THEN
+SET 'Recommendation' = "Immediate ICU Assessment"
+ELSE
+SET 'Recommendation' = "Standard Care"
+
+# Rule 4b: Recommendation for Moderate Risk
+IF 'Risk' == "Moderate Risk" THEN
+SET 'Recommendation' = "Urgent Nurse Review"
+ELSE
+SET 'Recommendation' = "Standard Care"
+
+# Rule 5: Count high-risk patients
+IF 'Risk' == "High Risk" THEN
+SET 'High_Risk_Count' = COUNT WHERE 'Risk' == "High Risk"
+ELSE
+SET 'High_Risk_Count' = COUNT WHERE 'Risk' == "High Risk"
+
+# Rule 5b: Count total patients
+IF 'Risk' == "High Risk" OR 'Risk' == "Moderate Risk" OR 'Risk' == "Normal" THEN
+SET 'Total_Patients' = COUNT WHERE 'Risk' == "High Risk" OR 'Risk' == "Moderate Risk" OR 'Risk' == "Normal"
+ELSE
+SET 'Total_Patients' = COUNT WHERE 'Risk' == "High Risk" OR 'Risk' == "Moderate Risk" OR 'Risk' == "Normal"
+
+# Rule 6a: Hospital Alert Status Critical
+IF 'High_Risk_Count' > 20 THEN
+SET 'Hospital_Alert' = "CRITICAL ALERT"
+ELSE
+SET 'Hospital_Alert' = "NORMAL"
+
+# Rule 6b: Hospital Alert Status Warning
+IF 'High_Risk_Count' > 10 AND 'High_Risk_Count' <= 20 THEN
+SET 'Hospital_Alert' = "WARNING"
+ELSE
+SET 'Hospital_Alert' = "NORMAL"
+
+# Rule 7a: Hospital Alert Level Critical
+IF 'High_Risk_Count' > 20 THEN
+SET 'Alert_Level' = 2
+ELSE
+SET 'Alert_Level' = 0
+
+# Rule 7b: Hospital Alert Level Warning
+IF 'High_Risk_Count' > 10 AND 'High_Risk_Count' <= 20 THEN
+SET 'Alert_Level' = 1
+ELSE
+SET 'Alert_Level' = 0

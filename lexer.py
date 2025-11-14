@@ -17,12 +17,15 @@ class TokenType(Enum):
     # Keywords
     IF = 'IF'
     THEN = 'THEN'
+    ELSE = 'ELSE'  # NEW: ELSE keyword
     SET = 'SET'
     AND = 'AND'
     OR = 'OR'
     NOT = 'NOT'
     IS = 'IS'
     NULL = 'NULL'
+    COUNT = 'COUNT'  # NEW: COUNT function
+    WHERE = 'WHERE'  # NEW: WHERE clause for COUNT
     
     # Data Types / Values
     NUMBER = 'NUMBER'     # 100, 98.6
@@ -42,6 +45,7 @@ class TokenType(Enum):
     # Punctuation
     LPAREN = '('
     RPAREN = ')'
+    NEWLINE = '\n'
     
     # End of File
     EOF = 'EOF'
@@ -62,6 +66,7 @@ class Token:
 RESERVED_KEYWORDS = {
     'IF': TokenType.IF,
     'THEN': TokenType.THEN,
+    'ELSE': TokenType.ELSE,  # NEW
     'SET': TokenType.SET,
     'AND': TokenType.AND,
     'OR': TokenType.OR,
@@ -70,6 +75,8 @@ RESERVED_KEYWORDS = {
     'NULL': TokenType.NULL,
     'TRUE': TokenType.BOOLEAN,
     'FALSE': TokenType.BOOLEAN,
+    'COUNT': TokenType.COUNT,  # NEW
+    'WHERE': TokenType.WHERE,  # NEW
 }
 
 class Lexer:
@@ -98,11 +105,12 @@ class Lexer:
             self.current_char = None
 
     def skip_whitespace(self):
-        """Skip over any whitespace or comment characters."""
+        """Skip over spaces, tabs, and comments (but NOT newlines)."""
         while self.current_char is not None:
-            if self.current_char.isspace():
+            # Skip spaces and tabs only; preserve newlines as tokens
+            if self.current_char in (' ', '\t', '\r'):
                 self.advance()
-            # Also add comment skipping
+            # Also add comment skipping (skip until newline but don't consume it)
             elif self.current_char == '#':
                 while self.current_char is not None and self.current_char != '\n':
                     self.advance()
@@ -159,7 +167,7 @@ class Lexer:
         
         # Convert boolean strings to actual booleans
         if token_type == TokenType.BOOLEAN:
-            value = True if result == 'True' else False
+            value = True if result.upper() == 'TRUE' else False
             return Token(token_type, value, self.line, start_col)
         
         # Disallow unquoted identifiers for simplicity, except for keywords
@@ -173,7 +181,13 @@ class Lexer:
         while self.current_char is not None:
             start_col = self.col
             
-            if self.current_char.isspace() or self.current_char == '#':
+            # Emit NEWLINE tokens instead of skipping them
+            if self.current_char == '\n':
+                token = Token(TokenType.NEWLINE, '\n', self.line, self.col)
+                self.advance()
+                return token
+            
+            if self.current_char in (' ', '\t', '\r') or self.current_char == '#':
                 self.skip_whitespace()
                 continue
                 

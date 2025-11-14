@@ -1,7 +1,16 @@
 """
 Main entry point for the Medical Triage Interpreter.
 
-This file is responsible for:
+This file is respons        # Hospital alert thresholds (adjustable)
+        if high_risk_count > 50:
+            hospital_alert = "CRITICAL ALERT"
+            alert_level = 2
+        elif high_risk_count > 20:
+            hospital_alert = "WARNING ALERT"
+            alert_level = 1
+        else:
+            hospital_alert = "NORMAL"
+            alert_level = 0
 1. Reading the rule script(s) from the /tests directory.
 2. Reading the patient data from the /data directory.
 3. Running the full interpreter pipeline:
@@ -74,31 +83,44 @@ def run_interpreter(rule_script, data_filepath):
         
         print("\n--- Triage Execution Complete ---")
         
-        # Display the results
-        # We show only the key columns for brevity
+        print("\n--- Hospital-Level Alert Status ---")
+        print(f"High Risk Patients: {results_df['High_Risk_Count'].iloc[0]:,} / {results_df['Total_Patients'].iloc[0]:,} ({(results_df['High_Risk_Count'].iloc[0] / results_df['Total_Patients'].iloc[0] * 100):.2f}%)")
+        print(f"Hospital Alert: {results_df['Hospital_Alert'].iloc[0]}")
+        print(f"Alert Level: {results_df['Alert_Level'].iloc[0]}")
+        
+        # Display the results with all columns properly expanded
         result_columns = [
-            'Patient ID', 'Heart Rate', 'Oxygen Saturation', 'BMI',
-            'Risk', 'Fever', 'Needs_Obesity_Consult'
+            'Patient ID', 'Heart Rate', 'Oxygen Saturation', 'Derived_BMI',
+            'Risk', 'Fever', 'Needs_Obesity_Consult', 'Recommendation'
         ]
         
         # Filter for columns that actually exist in the final dataframe
         display_cols = [col for col in result_columns if col in results_df.columns]
         
+        # Expand pandas display to show all columns without truncation
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.max_colwidth', None)
+        pd.set_option('display.width', None)
+        pd.set_option('display.max_rows', None)
+        
         # Show first 10 and last 10 patients
-        print("--- Triage Results (Sample) ---")
-        with pd.option_context('display.max_rows', 20, 'display.width', 1000):
-            print(results_df[display_cols].head(10))
-            print("...")
-            print(results_df[display_cols].tail(10))
+        print("\n--- Patient Triage Results (Sample) ---")
+        print("\nFirst 10 patients:")
+        print(results_df[display_cols].head(10))
+        print("\n...")
+        print("\nLast 10 patients:")
+        print(results_df[display_cols].tail(10))
 
         print(f"\nSuccessfully processed {len(results_df)} patients.")
         
     except TriageError as e:
         print(f"\n--- INTERPRETER FAILED ---")
-        print(f"An error occurred:\n{e}", file=sys.stderr)
+        print(f"An Error Occured:\n{e}")
     except Exception as e:
         print(f"\n--- SYSTEM ERROR ---")
-        print(f"An unexpected Python error occurred:\n{e}", file=sys.stderr)
+        print(f"An Error Occured:\n{e}")
+        import traceback
+        traceback.print_exc()
 
 def main():
     """
@@ -121,115 +143,4 @@ def main():
     run_interpreter(invalid_rule_script, DATA_FILEPATH)
 
 if __name__ == "__main__":
-    main()
-
-#DATA PREPROCESSING 
-
-import pandas as pd
-
-# Load the dataset
-file_name = "human_vital_signs_dataset_2024.csv"
-df = pd.read_csv(file_name)
-
-# Display the first few rows
-print("--- DataFrame Head ---")
-print(df.head().to_markdown(index=False, numalign="left", stralign="left"))
-
-# Display column information
-print("\n--- DataFrame Info ---")
-df.info()
-
-
-# Convert 'Timestamp' column to datetime objects
-df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-
-# Verify the conversion
-print(df['Timestamp'].dtype)
-
-
-# Check unique values in 'Gender' and 'Risk Category'
-print("\nUnique values in 'Gender':", df['Gender'].unique())
-print("Unique values in 'Risk Category':", df['Risk Category'].unique())
-
-# Assuming we find values like ['Male', 'Female', 'male', 'female'], we would standardize them:
-# df['Gender'] = df['Gender'].str.capitalize()
-
-
-
-# Example for Heart Rate outlier detection (assuming a plausible range)
-hr_min = 40
-hr_max = 180
-outliers_hr = df[(df['Heart Rate'] < hr_min) | (df['Heart Rate'] > hr_max)]
-print(f"\nNumber of Heart Rate outliers (outside {hr_min}-{hr_max} bpm): {len(outliers_hr)}")
-
-# Handling: Removing the identified outliers (if chosen)
-# df = df[(df['Heart Rate'] >= hr_min) & (df['Heart Rate'] <= hr_max)]
-
-
-# Extract the hour of the reading
-df['Reading_Hour'] = df['Timestamp'].dt.hour
-
-# Extract the day of the week
-df['Day_of_Week'] = df['Timestamp'].dt.day_name()
-
-# Display the new columns
-print("\nDataFrame with new features:")
-print(df[['Timestamp', 'Reading_Hour', 'Day_of_Week']].head().to_markdown(index=False, numalign="left", stralign="left"))
-
-
-
-# 1. Label Encode the 'Risk Category' (Target)
-# Assuming 'High Risk' = 1 and 'Low Risk' = 0
-df['Risk Category Encoded'] = df['Risk Category'].map({'High Risk': 1, 'Low Risk': 0})
-
-# 2. Label Encode 'Gender'
-# Assuming 'Male' = 1 and 'Female' = 0 (or vice versa, the order doesn't drastically change for binary)
-df['Gender Encoded'] = df['Gender'].map({'Male': 1, 'Female': 0})
-
-# Drop the original categorical columns
-df = df.drop(columns=['Gender', 'Risk Category'])
-
-print("\n--- After Encoding and Dropping Originals ---")
-print(df[['Gender Encoded', 'Risk Category Encoded']].head().to_markdown(index=False, numalign="left", stralign="left"))
-
-
-
-from sklearn.preprocessing import StandardScaler
-import numpy as np
-
-# Identify numerical columns for scaling (excluding IDs and the encoded/datetime columns)
-# We will use all float64 and int64 columns except Patient ID, and the encoded columns
-numerical_cols = df.select_dtypes(include=np.number).columns.tolist()
-cols_to_exclude = ['Patient ID', 'Gender Encoded', 'Risk Category Encoded']
-features_to_scale = [col for col in numerical_cols if col not in cols_to_exclude]
-
-# Initialize the Scaler
-scaler = StandardScaler()
-
-# Apply Standardization to the selected features
-df[features_to_scale] = scaler.fit_transform(df[features_to_scale])
-
-print("\n--- After Feature Scaling (Standardization) ---")
-print(df[features_to_scale].head().to_markdown(index=False, numalign="left", stralign="left"))
-
-
-
-# Check the correlation matrix for highly correlated features
-# Example: Correlation between derived features and their source features
-correlation_check = df[['Systolic Blood Pressure', 'Diastolic Blood Pressure', 'Derived_Pulse_Pressure', 'Derived_MAP']].corr()
-
-print("\n--- Correlation Check (SBP, DBP, PP, MAP) ---")
-print(correlation_check.to_markdown(numalign="left", stralign="left"))
-
-# Action to take (if correlation is very high, e.g., > 0.95):
-# Drop one of the highly correlated columns, e.g., df = df.drop(columns=['Derived_Pulse_Pressure'])
-
-
-
-# Final check of the data types
-df.info()
-
-# Save the cleaned data to a new CSV file
-# df.to_csv('human_vital_signs_cleaned.csv', index=False)
-
-
+    main() 

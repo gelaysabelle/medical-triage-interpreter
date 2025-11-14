@@ -1,4 +1,4 @@
-"""
+﻿"""
 Error Handler for the Medical Triage Interpreter
 
 This file defines the custom exception classes that are raised by
@@ -24,13 +24,14 @@ class LexerError(TriageError):
     """Raised when the lexer encounters an invalid character or malformed token."""
     pass
 
+
 class ParserError(TriageError):
     """Raised when the parser encounters a syntax error."""
     pass
 
+
 class ExecutorError(TriageError):
     """Raised during rule execution (e.g., type mismatch, missing variable)."""
-    # Executor errors don't always have a line/col, so we can make it optional
     def __init__(self, message, line_num=None, col_num=None):
         super().__init__(message)
         self.message = message
